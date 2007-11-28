@@ -3,7 +3,7 @@
 #
 # Author: 
 #
-#  $Id: check_3ware,v 1.4 2007/09/11 16:14:06 dyoung Exp $
+#  $Id$
 #
 # Description:
 # -----------
@@ -19,29 +19,13 @@
 #    (substitute /usr/sbin/tw_cli for the proper path to tw_cli)
 #
 ########################################################################
-#
-#  $Log: check_3ware,v $
-#  Revision 1.4  2007/09/11 16:14:06  dyoung
-#  Minor fix in check routine.  INIT should now produce output as expected.
-#
-#  Revision 1.3  2007/07/24 16:42:31  nagios
-#  Added additional checks for INIT and REBUILD
-#
-#  Revision 1.2  2007/06/25 22:58:02  dyoung
-#  Minor changes
-#
-#  Revision 1.1  2007/06/25 22:45:01  dyoung
-#  Initial release, nagios script to check the status of the 3ware devices
-#
-#
-########################################################################
 
 require 5.004;
 
 use POSIX;
 
 use strict;
-use vars qw($PROGNAME $CHECKNAME $AUTHOR $TIMEOUT %ECODES);
+use vars qw($PROGNAME $CHECKNAME $AUTHOR $TIMEOUT %ECODES $VERSION);
 use vars qw($opt_w $opt_c $opt_s $verbose);
 
 #
@@ -51,6 +35,7 @@ use vars qw($opt_w $opt_c $opt_s $verbose);
 $PROGNAME  = q(check_3ware);
 $CHECKNAME = q(3WARE);
 $AUTHOR    = q(Donovan Young);
+$VERSION   = "1.5";
 
 $TIMEOUT  = q(15);
 %ECODES   = (
@@ -99,19 +84,13 @@ sub print_help () {
 ";
 }
 
-sub print_revision ($$) {
-    my $commandName = shift;
-    my $pluginRevision = shift;
-    $pluginRevision =~ s/^\$Revision: //;
-    $pluginRevision =~ s/ \$\s*$//;
+sub revision () {
+    my $commandName = $PROGNAME;
+    my $pluginRevision = $VERSION;
     print "$commandName $pluginRevision\n";
     print " The nagios plugins come with ABSOLUTELY NO WARRANTY. You may redistribute\n";
     print " copies of the plugins under the terms of the GNU General Public License.\n";
     print " For more information about these matters, see the file named COPYING.\n";
-}
-
-sub revision() {
-	print_revision($PROGNAME,'$Revision: 1.4 $');
 }
 
 sub version () {
