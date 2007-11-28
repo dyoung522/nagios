@@ -1,0 +1,258 @@
+#!/usr/bin/perl -w
+
+#
+# Author: Donovan Young
+#
+#  $Id: check_mda,v 1.4 2007/03/03 02:24:09 nagios Exp $
+#
+# Description:
+# -----------
+#
+# Nagios script to check Nameseeker Queue status using StatusCheck2.jsp
+#
+# Implementation Notes:
+# ---------------------
+#
+# Uses "https://secure.seekerinc.com/admin/statuscheck2.jsp" to obtain
+# current status information.
+#
+# Needs local ssh redirect on port 9001 in order to function properly
+#
+########################################################################
+#
+#  $Log: check_mda,v $
+#  Revision 1.4  2007/03/03 02:24:09  nagios
+#  Added https to -H parsing
+#
+#  Revision 1.3  2007/03/03 00:36:10  nagios
+#  Added -H as a requirement
+#
+#  Revision 1.2  2007/02/28 15:13:03  dyoung
+#  Added 'minutes' text to Old Jobs check to clarify results.
+#
+#  Revision 1.1  2007/01/31 20:42:43  dyoung
+#  Moved to rhino/scripts/nagios
+#
+#  Revision 1.4  2007/01/22 17:56:25  dyoung
+#  Cleaned up checks and added total queue as definitive default check (even
+#  if --service is called incorectly).
+#
+#  Revision 1.3  2007/01/22 17:26:16  dyoung
+#  Added checks for last query; last order; and last download.
+#
+#  Revision 1.2  2007/01/22 17:09:00  dyoung
+#  Added CVS tags
+#
+########################################################################
+
+require 5.004;
+
+use POSIX;
+use strict;
+use Getopt::Long;
+use LWP::UserAgent;
+use lib '/usr/local/nagios/libexec';
+use vars qw($PROGNAME $opt_w $opt_c $opt_s $checkhost $verbose);
+use utils qw($TIMEOUT %ERRORS &print_revision &support &usage);
+
+$PROGNAME  = 'check_mda';
+
+Getopt::Long::Configure('bundling', 'no_ignore_case');
+GetOptions (
+         "V|version"     => \&version,
+         "h|help"        => \&help,
+         "v|verbose"     => \$verbose,
+         "H|host=s"      => \$checkhost,
+         "w|warning=i"   => \$opt_w,
+         "c|critical=i"  => \$opt_c,
+         "s|service=s"   => \$opt_s,
+);
+
+# Set our defaults
+my $state       = 'OK';
+my $checkname   = 'StatusCheck2';
+my $checkresult = undef;
+($opt_s) || ($opt_s = 'queue');
+
+if ( not defined $checkhost ) {
+    print "You must provide a host to use with -H\n";
+    exit $ERRORS{'UNKNOWN'};
+}
+
+# The following is needed on the production sysmon server due to
+# network topology.
+#my $check_url = qw(https://127.0.0.1:9001/admin/statuscheck2.jsp);
+#my $check_url = qw(https://secure.seekerinc.com/admin/statuscheck2.jsp);
+my $check_url = qq(https://$checkhost/admin/statuscheck2.jsp);
+
+my $ua = LWP::UserAgent->new;
+$ua->timeout(10);
+
+my $status = $ua->get( $check_url );
+
+if ( ! $status->is_success ) {
+	print "Unable to retrieve $check_url\n";
+	exit $ERRORS{'CRITICAL'};
+}
+
+# Parse the output
+my ( $header, $q_cnt, $q_big_cnt, $q_old_mins, $last_run_min, $last_order_min, $last_ship_min ) = split ',', $status->content;
+
+# remove trailing newline
+chomp( $last_ship_min );
+
+# Convert blanks to 0's
+( $q_cnt )          || ( $q_cnt = 0 );              # Total Queue
+( $q_big_cnt )      || ( $q_big_cnt = 0 );          # Large Job Queue
+( $q_old_mins )     || ( $q_old_mins = 0 );         # Oldest Queued Job
+( $last_run_min )   || ( $last_run_min = 0 );       # Last Query
+( $last_order_min ) || ( $last_order_min = 0 );     # Last Order
+( $last_ship_min )  || ( $last_ship_min = 0 );      # Last Download
+
+# Calculate q_sml_cnt (small jobs)
+my $q_sml_cnt = ( $q_cnt - $q_big_cnt );
+
+# Create a named block so we can last out after our checks
+CHECK:
+{
+
+# See how we were called, and run the appropriate check (uses -s <service>)
+
+# Check the status of the large job queue
+if ( $opt_s =~ /large/ ) { 
+	print "Running Large Queue Check ( $opt_w / $opt_c )\n" if $verbose;
+        $checkname = 'large queue';
+	$checkresult = "large = $q_big_cnt";
+	$state = 'WARNING'  if ( defined $opt_w && $q_big_cnt > $opt_w );
+	$state = 'CRITICAL' if ( defined $opt_c && $q_big_cnt > $opt_c );
+        last CHECK;
+}
+
+# Check the status of the small job queue
+if ( $opt_s =~ /small/ ) { 
+	print "Running Small Queue Check ( $opt_w / $opt_c )\n" if $verbose;
+        $checkname = 'small queue';
+	$checkresult = "small = $q_sml_cnt";
+	$state = 'WARNING'  if ( defined $opt_w && $q_sml_cnt > $opt_w );
+	$state = 'CRITICAL' if ( defined $opt_c && $q_sml_cnt > $opt_c );
+        last CHECK;
+}
+
+# Check the time of the jobs in the queue
+if ( $opt_s =~ /old/ ) { 
+	print "Running Queue Time Check ( $opt_w / $opt_c )\n" if $verbose;
+        $checkname = 'old jobs';
+        $checkresult = "large = $q_big_cnt; small = $q_sml_cnt; old = $q_old_mins minutes";
+	$state = 'WARNING'  if ( defined $opt_w && ( $q_big_cnt > 5 || $q_sml_cnt > 5 ) && ( $q_old_mins > $opt_w ));
+	$state = 'CRITICAL' if ( defined $opt_c && ( $q_big_cnt > 5 || $q_sml_cnt > 5 ) && ( $q_old_mins > $opt_c ));
+        last CHECK;
+}
+
+# Check the time of the last query
+if ( $opt_s =~ /lastrun/ ) { 
+	print "Running Last Query Time Check ( $opt_w / $opt_c )\n" if $verbose;
+        $checkname = 'last query';
+        $checkresult = "last query = $last_run_min minutes";
+	$state = 'WARNING'  if ( defined $opt_w && ( $last_run_min > $opt_w ));
+	$state = 'CRITICAL' if ( defined $opt_c && ( $last_run_min > $opt_c ));
+        last CHECK;
+}
+
+# Check the time of the last order
+if ( $opt_s =~ /lastorder/ ) { 
+	print "Running Last Order Time Check ( $opt_w / $opt_c )\n" if $verbose;
+        $checkname = 'last order';
+        $checkresult = "last order = $last_order_min minutes";
+	$state = 'WARNING'  if ( defined $opt_w && ( $last_order_min > $opt_w ));
+	$state = 'CRITICAL' if ( defined $opt_c && ( $last_order_min > $opt_c ));
+        last CHECK;
+}
+
+# Check the time of the last download
+if ( $opt_s =~ /lastship/ ) { 
+	print "Running Last Download Time Check ( $opt_w / $opt_c )\n" if $verbose;
+        $checkname = 'last download';
+        $checkresult = "last download = $last_ship_min minutes";
+	$state = 'WARNING'  if ( defined $opt_w && ( $last_ship_min > $opt_w ));
+	$state = 'CRITICAL' if ( defined $opt_c && ( $last_ship_min > $opt_c ));
+        last CHECK;
+}
+
+# This is our default check, should be last in the block
+# as default (check_mda) - only check total queue
+print "Running Default Check ( $opt_w / $opt_c )\n" if $verbose;
+$checkname = 'total queue';
+$checkresult = "total = $q_cnt";
+$state = 'WARNING'  if ( defined $opt_w && $q_cnt > $opt_w );
+$state = 'CRITICAL' if ( defined $opt_c && $q_cnt > $opt_c );
+
+} # End CHECK: block
+
+if ( $verbose ) {
+	print "Queue Count       = $q_cnt\n";
+	print "Large Queue Count = $q_big_cnt\n";
+	print "Small Queue Count = $q_sml_cnt\n";
+	print "Oldest Item       = $q_old_mins minutes\n";
+	print "Last Run          = $last_run_min minutes\n";
+	print "Last Order        = $last_order_min minutes\n";
+	print "Last Shipment     = $last_ship_min minutes\n";
+	print "Status - $state\n";
+} else {
+	printf "%s %s - %s | (%d, %d, %d, %d, %d, %d)\n", uc $checkname, $state, $checkresult,
+		$q_cnt, $q_big_cnt, $q_old_mins, $last_run_min, $last_order_min, $last_ship_min;
+}
+
+# Exit based on current state
+exit $ERRORS{$state};
+
+#
+# Subroutines
+#
+sub print_usage () {
+	print "Usage: $PROGNAME [-vh] [-w warn] [-c crit] [-s service]\n";
+}
+
+sub print_help () {
+	revision();
+	print "\nWritten by Donovan Young\n\nPerl MDA Status plugin for Nagios\n\n";
+	print_usage();
+	print "
+-v, --verbose
+   Return additional information. 
+   Intended as a command-line aid, not recommended for Nagios script usage.
+   
+-w, --warning=INTEGER
+   Level at which we should issue a warning.  If omitted, no warning is generated. 
+   
+-c, --critical=INTEGER
+   Level at which we should issue a critical alert.  A critical is also generated
+   if we cannot reach the StatusCheck webpage.
+
+-s, --service=SERVICE_TYPE
+   The Type of check to perform, current valid types are:
+      queue     = check the total queue [default check]
+      large     = check the large job queue
+      small     = check the small job queue (total - large)
+      old       = check the time of the last job queued
+      lastrun   = check the time of the last query
+      lastorder = check the time of the last order
+      lastship  = check the time of the last download
+
+";
+}
+
+sub revision() {
+	print_revision($PROGNAME,'$Revision: 1.4 $');
+}
+
+sub version () {
+	revision();
+	exit $ERRORS{'OK'};
+}
+
+sub help () {
+	print_help();
+	exit $ERRORS{'OK'};
+}
+
+#======= end check_mda =====

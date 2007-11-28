@@ -1,0 +1,163 @@
+#!/usr/bin/perl -w
+#
+# Author: Donovan Young
+#
+#  $Id: check_ncoa,v 1.4 2007/06/25 16:17:16 dyoung Exp $
+#
+# Description:
+# -----------
+#
+# Nagios script to check NCOA installation for freshness
+#
+# Implementation Notes:
+# ---------------------
+#
+# Uses "/usr/local/NCOA" as the check directory
+#
+########################################################################
+#
+#  $Log: check_ncoa,v $
+#  Revision 1.4  2007/06/25 16:17:16  dyoung
+#  Fixed nagexec prototype error
+#
+#  Revision 1.3  2007/02/12 23:32:24  dyoung
+#  Changed default response to UNKNOWN if -w or -c not supplied
+#
+#  Revision 1.2  2007/01/31 23:16:14  dyoung
+#  Initial release
+#
+#  Revision 1.1  2007/01/31 23:14:42  dyoung
+#  *** empty log message ***
+#
+#
+########################################################################
+
+require 5.004;
+
+use POSIX;
+use strict;
+use Getopt::Long;
+use Time::Local;
+use lib '/usr/local/nagios/libexec';
+use vars qw($PROGNAME $CHECK_NAME $opt_w $opt_c $verbose);
+use utils qw($TIMEOUT %ERRORS &print_revision &support &usage);
+
+$PROGNAME   = 'check_ncoa';
+$CHECK_NAME = 'NCOA';
+
+Getopt::Long::Configure('bundling', 'no_ignore_case');
+GetOptions
+    ("V|version"     => \&version,
+     "h|help"        => \&help,
+     "v|verbose"     => \$verbose,
+     "w|warning=i"   => \$opt_w,
+     "c|critical=i"  => \$opt_c,
+     );
+
+#
+# Subroutines
+#
+sub print_usage () {
+    print "Usage: $PROGNAME [-vh] [-w warn] [-c crit]\n";
+}
+
+sub print_help () {
+    revision();
+    print "\nWritten by Donovan Young\n\nPerl NCOA Status plugin for Nagios\n\n";
+    print_usage();
+    print "
+-v, --verbose
+   Return additional information. 
+   Intended as a command-line aid, not recommended for Nagios script usage.
+   
+-w, --warning=INTEGER
+   Level at which we should issue a warning.  If omitted, no warning is generated. 
+   
+-c, --critical=INTEGER
+   Level at which we should issue a critical alert.  A critical is also generated
+   if we cannot reach the StatusCheck webpage.
+
+";
+}
+
+sub revision() {
+    print_revision($PROGNAME,'$Revision: 1.4 $');
+}
+
+sub version() {
+    revision();
+    exit $ERRORS{'OK'};
+}
+
+sub help() {
+    print_help();
+    exit $ERRORS{'OK'};
+}
+
+sub nagios_exit($$) {
+    my ( $state, $message ) = @_;
+    printf "%s %s - %s\n", $CHECK_NAME, $state, $message;
+    exit $ERRORS{$state};
+}
+
+# Initialize our variables and set our defaults
+my $check_state  = 'UNKNOWN';
+my $check_result = undef;
+my $check_directory = '/usr/local/NCOA';
+my $check_file = "$check_directory/dvdhdr01.dat";
+my $check_days = undef;
+my ( $release_year, $release_month, $release_day, $release_number ) = undef;
+my ( $release_epoch, $release_date, $current_epoch, $current_date ) = undef;
+
+# Make sure the symlink exists
+if ( not -l $check_directory ) { nagios_exit( 'CRITICAL', "$check_directory symbolic link does not exist" ); }
+
+# Open the current Header file
+open HDR, $check_file or nagios_exit( 'CRITICAL', "Unable to open $check_file: $!" );
+
+# Get the release date
+while (<HDR>) {
+    ( $release_year, $release_month, $release_day ) = m/^Release Date:\s+(\d{4})(\d{2})(\d{2})/
+        unless $release_year;
+    ( $release_number ) = m/^Release Number:\s+(\d{4})/
+        unless $release_number;
+
+    last if $release_number;
+}
+close HDR;
+
+# Convert current and release dates into epoch time
+$current_epoch = timelocal(localtime);
+$release_epoch = timelocal(0, 0, 0, $release_day, $release_month - 1, $release_year - 1900);
+
+# Calculate the age in days
+$check_days = ( gmtime($current_epoch - $release_epoch) )[7];
+
+# Current and release date in MM/DD/YYYY format
+$current_date = sprintf "%02d/%02d/%4d", (localtime)[4] + 1, (localtime)[3], (localtime)[5] + 1900;
+$release_date = sprintf "%02d/%02d/%4d", $release_month, $release_day, $release_year;
+
+# Status string
+$check_result = "NCOA Release $release_number is $check_days days old | " .
+                "Current = $current_date; " .
+                "Release = $release_date";
+
+# Check for WARNING or CRITICAL conditions
+if ( defined $opt_w or defined $opt_c ) {
+    $check_state = 'OK';
+    $check_state = 'WARNING'  if ( defined $opt_w && $check_days >= $opt_w );
+    $check_state = 'CRITICAL' if ( defined $opt_c && $check_days >= $opt_c );
+}
+
+if ( $verbose ) {
+    printf "Release Number    = %04d\n", $release_number;
+    printf "Current Date      = $current_date\n";
+    printf "Release Date      = $release_date\n";
+    printf "Release Age       = %d days\n", $check_days;
+    printf "Status            = $check_state\n";
+}
+
+# Exit based on current state
+nagios_exit( $check_state, $check_result );
+
+#======= end check_mda =====

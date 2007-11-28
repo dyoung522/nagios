@@ -1,0 +1,132 @@
+#!/usr/bin/perl -w
+
+#
+# Author: 
+#
+#  $Id: check_template,v 1.2 2007/08/08 22:17:08 nagios Exp $
+#
+# Description:
+# -----------
+#
+# Implementation Notes:
+# ---------------------
+#
+########################################################################
+#
+#  $Log: check_template,v $
+#  Revision 1.2  2007/08/08 22:17:08  nagios
+#  Corrected internal conflict with nagios_exit() routine and added performance
+#  data output when requested.
+#
+#  Revision 1.1  2007/06/22 20:54:07  dyoung
+#  nagios perl script template
+#
+#
+########################################################################
+
+require 5.004;
+
+use POSIX;
+
+use strict;
+use vars qw($PROGNAME $CHECKNAME $AUTHOR $TIMEOUT %ECODES);
+use vars qw($opt_w $opt_c $opt_s $verbose);
+
+#
+# common variables
+#
+## Change These to suite your needs##
+$PROGNAME  = qq(check_template);
+$CHECKNAME = qq($PROGNAME);  # In case this needs to be different
+$AUTHOR    = qq(Author's Name Here);
+
+$TIMEOUT  = qq(15);
+%ECODES   = (
+              'OK'        => 0,
+              'WARNING'   => 1,
+              'CRITICAL'  => 2,
+              'UNKNOWN'   => 3,
+              'DEPENDENT' => 4
+            );
+
+#
+# Process Options
+#
+use Getopt::Long;
+Getopt::Long::Configure('bundling', 'no_ignore_case');
+GetOptions (
+              "V|version"     => \&version,
+              "h|help"        => \&help,
+              "v|verbose"     => \$verbose,
+              "w|warning=i"   => \$opt_w,
+              "c|critical=i"  => \$opt_c,
+           );
+
+#
+# Subroutines
+#
+sub print_usage () {
+	print "Usage: $PROGNAME [-vh] [-w warn] [-c crit]\n";
+}
+
+sub print_help () {
+	print "\nWritten by $AUTHOR\n\nPerl plugin for Nagios\n\n";
+	print_usage();
+	print "
+-v, --verbose
+   Return additional information. 
+   Intended as a command-line aid, not recommended for Nagios script usage.
+   
+-w, --warning=INTEGER
+   Level at which we should issue a warning.  If omitted, no warning is generated. 
+   
+-c, --critical=INTEGER
+   Level at which we should issue a critical alert.  A critical is also generated
+   if we cannot reach the StatusCheck webpage.
+
+";
+}
+
+sub revision() {
+	print_revision($PROGNAME,'$Revision: 1.2 $');
+}
+
+sub version () {
+	revision();
+	exit $ECODES{'OK'};
+}
+
+sub help () {
+	print_help();
+	exit $ECODES{'OK'};
+}
+
+sub myexit($$$) {
+        my ( $state, $message, $perfdata ) = @_;
+        ( $state )   || ( $state   = q(UNKNOWN) );
+        ( $message ) || ( $message = q() );
+        printf "%s %s - %s", $CHECKNAME, $state, $message;
+        if ( defined $perfdata ) { printf "|%s", $perfdata; }
+        print "\n";
+        exit $ECODES{$state};
+}
+
+#
+# Set our defaults
+#
+my $checkstate  = q(UNKNOWN);
+my $checkresult = q();
+my $checkdata   = q();
+
+# Main()
+MAIN: {
+    die "Please modify this script to perform your own checks\n";
+}
+
+#
+# Exit based on current state
+#
+myexit( $checkstate, $checkresult, $checkdata );
+
+#======= end script =======
+1;
