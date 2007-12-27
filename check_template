@@ -3,24 +3,12 @@
 #
 # Author: 
 #
-#  $Id$
 #
 # Description:
 # -----------
 #
 # Implementation Notes:
 # ---------------------
-#
-########################################################################
-#
-#  $Log: check_template,v $
-#  Revision 1.2  2007/08/08 22:17:08  nagios
-#  Corrected internal conflict with nagios_exit() routine and added performance
-#  data output when requested.
-#
-#  Revision 1.1  2007/06/22 20:54:07  dyoung
-#  nagios perl script template
-#
 #
 ########################################################################
 
@@ -111,8 +99,12 @@ sub myexit($$$) {
         my ( $state, $message, $perfdata ) = @_;
         ( $state )   || ( $state   = q(UNKNOWN) );
         ( $message ) || ( $message = q() );
-        printf "%s %s - %s", $CHECKNAME, $state, $message;
+
+        printf "%s %s", $CHECKNAME, $state;
+        if ( $message ) { printf " - %s", $message; }
+
         if ( defined $perfdata ) { printf "|%s", $perfdata; }
+
         print "\n";
         exit $ECODES{$state};
 }
