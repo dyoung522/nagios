@@ -111,16 +111,24 @@ sub help () {
 }
 
 sub myexit($$$) {
-        my ( $state, $message, $perfdata ) = @_;
-        ( $state )   || ( $state   = q(UNKNOWN) );
-        ( $message ) || ( $message = q() );
+    my ( $state, $message, $perfdata ) = @_;
+    ( $state )   || ( $state   = q(UNKNOWN) );
+    ( $message ) || ( $message = q() );
 
-        printf "%s %s", $CHECKNAME, $state;
-        if ( $message ) { printf " - %s", $message; }
-        if ( defined $perfdata ) { printf "|%s", $perfdata; }
+    printf "%s %s", $CHECKNAME, $state;
+    if ( $message ) { printf " - %s", $message; }
+    if ( defined $perfdata ) { printf "|%s", $perfdata; }
 
-        print "\n";
-        exit $ECODES{$state};
+    print "\n";
+    exit $ECODES{$state};
+}
+
+sub logresponse($) {
+    open LOG, ">>/tmp/$CHECKNAME" or return 0;
+    printf LOG "\nReceived the following response @ %s\n", scalar localtime(time);
+    print LOG "@_\n";
+    close LOG;
+    return 1;
 }
 
 #
@@ -174,17 +182,23 @@ MAIN: {
 
     if ( defined $verbose ) { print "Sending:\n$TEST_XML\n"; }
     print TEST_OUT $TEST_XML; close( TEST_OUT );
- 
+
     my $response = <TEST_IN>; close( TEST_IN );
     if ( defined $verbose && defined $response ) { print "Received: $response\n"; }
 
     if ( defined $response && $response =~ /firstScore/ ) {
         $checkstate  = q(OK);
-        $checkdata   = $response;
     } else {
         $checkstate  = q(CRITICAL);
         $checkresult = q(Did not receive a valid response);
+
+        # Log the response to a file
+        logresponse($response);
+
+        # Format the reponse into something nagios can print in the perfdata field.
         $checkdata   = $response;
+        $checkdata   =~ s/\<\?xml\s+version=\S+\s+\?\>//;
+        $checkdata   =~ tr/<>/[]/;
     }
 }
 
