@@ -38,14 +38,10 @@ $TIMEOUT  = qq(15);
               'DEPENDENT' => 4
             );
 
-# Define static vars
-my $Hour = ( 60 * 60 );     # The number of seconds in an hour.
-my $Day  = ( $Hour * 24 );  # The number of seconds in a day.
-my $Week = ( $Day * 7 );    # The number of seconds in a week.
-
 # Set some defaults
 my $def_warn = '24 Hours';
 my $def_crit = '+24 Hours';
+my $TimeSpecified = 0;
 
 #
 # Process Options
@@ -76,18 +72,26 @@ sub print_help {
     Return additional information. 
     Intended as a command-line aid, not recommended for Nagios script usage.
 
--w, --warning time ( hour(s) | day(s) | week(s) )
+-w, --warning time ( hour(s) | day(s) | week(s) ) OR hour ( AM | PM )
     The amount of time since the last update before we issue a warning.
     You may specify an additional qualifier such as 'hours' 'days' or 'weeks'.
     The default (if no qualifier is given) is hours.  So '24' would be 24 hours.
+
+    You can also specify an exact hour at which the file should be available by
+    adding an AM or PM to the time (e.g. '8 AM' ).  This assumes a daily file.
+
     (Defaults to $def_warn)
 
--w, --critical [+]time ( hour(s) | day(s) | week(s) )
+-c, --critical [+]time ( hour(s) | day(s) | week(s) ) OR hour ( AM | PM )
     Like --warn, this specifies how much time has passed before we issue a
     critical alert.  It takes the same syntax as --warn above with the addition
     that you can prepend a '+' symbol, and it will treat the time as added to
     the --warn time.
     (e.g. '+24' would mean, go critical 24 hours after our warning time).
+
+    You can also specify an exact hour at which the file should be available by
+    adding an AM or PM to the time (e.g. '2 PM' ).  This assumes a daily file.
+
     (Defaults to $def_crit)
 
 -p, --pattern
@@ -132,28 +136,27 @@ sub myexit {
         exit $ECODES{'UNKNOWN'};
 }
 
-sub warn_offset {
+sub time_offset {
+    my $time = shift;
     my $warn = shift;
-
-    if ( $warn =~ /(\d+)\s*(hour)*/i ) { return ( $1 * $Hour ); }
-    if ( $warn =~ /(\d+)\s*day/i     ) { return ( $1 * $Day ); }
-    if ( $warn =~ /(\d+)\s*week/i    ) { return ( $1 * $Week ); }
-
-    return 0;
-}
-
-sub crit_offset {
-    my ( $crit, $warn ) = @_;
     my $offset = 0;
+    my $Hour = ( 60 * 60 );     # The number of seconds in an hour.
+    my $Day  = ( $Hour * 24 );  # The number of seconds in a day.
+    my $Week = ( $Day * 7 );    # The number of seconds in a week.
 
-    if ( $crit =~ /(\d+)\s*(hour)*/i ) { $offset = ( $1 * $Hour ); }
-    if ( $crit =~ /(\d+)\s*day/i     ) { $offset = ( $1 * $Day ); }
-    if ( $crit =~ /(\d+)\s*week/i    ) { $offset = ( $1 * $Week ); }
+    # If we're given AM or PM, return the hour (converted to 24-hour format)
+    if ( $time =~ /(\d+)\s*[a]/i )     { $TimeSpecified = 1; return $1 == 12 ? 0 : $1; }
+    if ( $time =~ /(\d+)\s*[p]/i )     { $TimeSpecified = 1; return $1 == 12 ? $1 : $1 + 12 ; }
 
-    if ( $crit =~ /^\+/ ) { $offset += $warn; }
+    # Calculate the time offset
+    if ( $time =~ /(\d+)\s*(hour)*/i ) { $offset = ( $1 * $Hour ); }   # offset in hours
+    if ( $time =~ /(\d+)\s*day/i     ) { $offset = ( $1 * $Day );  }   # offset in days
+    if ( $time =~ /(\d+)\s*week/i    ) { $offset = ( $1 * $Week ); }   # offset in weeks
+
+    # If we're given a plus, add it to the warning offset.
+    if ( $time =~ /^\+/ ) { $offset += $warn; }
 
     return $offset;
-    #return ( $crit * $Hour ) - ( $warn * $Hour );
 }
 
 #
@@ -161,11 +164,13 @@ sub crit_offset {
 #
 if ( not defined $opt_pattern ) { myexit 'DEPENDENT', "You must supply a pattern to search for"; }
 my $Pattern = $opt_pattern;
+my $current_time = time;
 
 # Reset options if given on the command line
-my $Warn = defined $opt_warn ? warn_offset( $opt_warn )        : warn_offset( $def_warn );
-my $Crit = defined $opt_crit ? crit_offset( $opt_crit, $Warn ) : crit_offset( $def_crit, $Warn );
-my $current_time = time;
+my $Warn = defined $opt_warn ? time_offset( $opt_warn, 0 )     : time_offset( $def_warn, 0 );
+my $Crit = defined $opt_crit ? time_offset( $opt_crit, $Warn ) : time_offset( $def_crit, $Warn );
+
+if ( $Crit < $Warn ) { myexit( 'DEPENDENT', "Crit can't be less than Warn" ); }
 
 my %filehash = (   # Holds the latest file info
     'NAME' => undef,
@@ -201,7 +206,7 @@ MAIN: {
 
     # At this point, our %filehash contains the most recent file matching the pattern.
 
-    $checkdata   = scalar localtime( $filehash{'TIME'} );
+    $checkdata   = $filehash{'NAME'} . " last updated on " . scalar localtime( $filehash{'TIME'} );
 
     if ( $opt_verbose ) {
         printf "Using the pattern %s ( Warning Offset = %s, Critical Offset = %s )\n", $Pattern, $Warn, $Crit;
@@ -214,12 +219,37 @@ MAIN: {
         printf "Latest file found was %s (%s)\n", $filehash{'NAME'}, scalar localtime( $filehash{'TIME'} );
     }
 
-    if ( ( $current_time - $filehash{'TIME'} ) > $Warn ) {
-        $checkstate  = 'WARNING';
-        $checkresult = "$Pattern has not been updated since " . scalar localtime( $filehash{'TIME'} );
-    }
+    # We were given a specific time, so see if the files been updated by then.
+    if ( $TimeSpecified ) {
+        my $current_hour = ( localtime( $current_time ) )[2];
+        my $current_day  = ( localtime( $current_time ) )[3];
+        my $file_hour    = ( localtime( $filehash{'TIME'} ) )[2];
+        my $file_day     = ( localtime( $filehash{'TIME'} ) )[3];
 
-    if ( ( $current_time - $filehash{'TIME'} ) > $Crit ) { $checkstate  = 'CRITICAL'; }
+        # has the file been updated today?
+        if ( $current_day != $file_day ) {
+
+            # Is it past the warning time?
+            if ( $current_hour > $Warn ) {
+
+                $checkstate  = 'WARNING';
+                $checkresult = "$Pattern has not been updated since " . scalar localtime( $filehash{'TIME'} );
+
+                # Ok, is it also past the critical time?
+                if ( $current_hour > $Crit ) { $checkstate = 'CRITICAL'; }
+            }
+        }
+
+    } else {
+
+        # Run a standard time-offset check
+        if ( ( $current_time - $filehash{'TIME'} ) > $Warn ) {
+            $checkstate  = 'WARNING';
+            $checkresult = "$Pattern has not been updated since " . scalar localtime( $filehash{'TIME'} );
+        }
+
+        if ( ( $current_time - $filehash{'TIME'} ) > $Crit ) { $checkstate  = 'CRITICAL'; }
+    }
 }
 
 #
