@@ -1,0 +1,231 @@
+#!/usr/bin/perl -w 
+#
+# Author:  Donovan C. Young
+#
+# Description:
+#    Checks for the existance of regularly scheduled files.
+#    Issues a warning or critical alarm based upon the
+#    parameters provided.
+#
+# -----------
+#
+# Implementation Notes:
+# ---------------------
+#
+########################################################################
+
+require 5.004;
+
+use strict;
+use vars qw( $PROGNAME $CHECKNAME $AUTHOR $TIMEOUT %ECODES $VERSION );
+use vars qw( $opt_verbose $opt_configfile $opt_pattern $opt_warn $opt_crit );
+
+#
+# common variables
+#
+## Change These to suite your needs##
+$PROGNAME  = qq(check_triggers);
+$CHECKNAME = qq($PROGNAME);  # In case this needs to be different
+$AUTHOR    = qq(Donovan C. Young);
+$VERSION   = "1.0"; # Program version
+
+$TIMEOUT  = qq(15);
+%ECODES   = (
+              'OK'        => 0,
+              'WARNING'   => 1,
+              'CRITICAL'  => 2,
+              'UNKNOWN'   => 3,
+              'DEPENDENT' => 4
+            );
+
+# Define static vars
+my $Hour = ( 60 * 60 );     # The number of seconds in an hour.
+my $Day  = ( $Hour * 24 );  # The number of seconds in a day.
+my $Week = ( $Day * 7 );    # The number of seconds in a week.
+
+# Set some defaults
+my $def_warn = '24 Hours';
+my $def_crit = '+24 Hours';
+
+#
+# Process Options
+#
+use Getopt::Long;
+Getopt::Long::Configure('bundling', 'no_ignore_case');
+GetOptions (
+              "V|version"       => \&version,
+              "h|help"          => \&help,
+              "v|verbose+"      => \$opt_verbose,
+              "w|warning=s"     => \$opt_warn,
+              "c|critical=s"    => \$opt_crit,
+              "p|pattern=s"     => \$opt_pattern,
+           );
+
+#
+# Subroutines
+#
+sub print_usage {
+    print "Usage: $PROGNAME [-vh] [-w warn] [-c crit] <-p pattern>\n";
+}
+
+sub print_help {
+    print "\nWritten by $AUTHOR\n\nPerl plugin for Nagios\n\n";
+    print_usage();
+    print "
+-v, --verbose
+    Return additional information. 
+    Intended as a command-line aid, not recommended for Nagios script usage.
+
+-w, --warning time ( hour(s) | day(s) | week(s) )
+    The amount of time since the last update before we issue a warning.
+    You may specify an additional qualifier such as 'hours' 'days' or 'weeks'.
+    The default (if no qualifier is given) is hours.  So '24' would be 24 hours.
+    (Defaults to $def_warn)
+
+-w, --critical [+]time ( hour(s) | day(s) | week(s) )
+    Like --warn, this specifies how much time has passed before we issue a
+    critical alert.  It takes the same syntax as --warn above with the addition
+    that you can prepend a '+' symbol, and it will treat the time as added to
+    the --warn time.
+    (e.g. '+24' would mean, go critical 24 hours after our warning time).
+    (Defaults to $def_crit)
+
+-p, --pattern
+    This is the file pattern to search for.  It may (should) contain
+    the full path to the file(s) to check, otherwise it will check whichever
+    directory it's called from (which may not be known).  Shell patterns are OK.
+
+";
+}
+
+sub revision {
+    my $commandName = $PROGNAME;
+    my $pluginRevision = $VERSION;
+    print "$commandName $pluginRevision\n";
+    print " The nagios plugins come with ABSOLUTELY NO WARRANTY. You may redistribute\n";
+    print " copies of the plugins under the terms of the GNU General Public License.\n";
+    print " For more information about these matters, see the file named COPYING.\n";
+}
+
+sub version {
+    revision();
+    exit $ECODES{'OK'};
+}
+
+sub help {
+    print_help();
+    exit $ECODES{'OK'};
+}
+
+sub myexit {
+        my ( $state, $message, $perfdata ) = @_;
+        ( $state )   || ( $state   = q(UNKNOWN) );
+        ( $message ) || ( $message = q() );
+
+        printf "%s %s", $CHECKNAME, $state;
+        if ( $message ) { printf " - %s", $message; }
+
+        if ( defined $perfdata ) { printf "|%s", $perfdata; }
+
+        print "\n";
+        if ( defined $ECODES{$state} ) { exit $ECODES{$state}; }
+        exit $ECODES{'UNKNOWN'};
+}
+
+sub warn_offset {
+    my $warn = shift;
+
+    if ( $warn =~ /(\d+)\s*(hour)*/i ) { return ( $1 * $Hour ); }
+    if ( $warn =~ /(\d+)\s*day/i     ) { return ( $1 * $Day ); }
+    if ( $warn =~ /(\d+)\s*week/i    ) { return ( $1 * $Week ); }
+
+    return 0;
+}
+
+sub crit_offset {
+    my ( $crit, $warn ) = @_;
+    my $offset = 0;
+
+    if ( $crit =~ /(\d+)\s*(hour)*/i ) { $offset = ( $1 * $Hour ); }
+    if ( $crit =~ /(\d+)\s*day/i     ) { $offset = ( $1 * $Day ); }
+    if ( $crit =~ /(\d+)\s*week/i    ) { $offset = ( $1 * $Week ); }
+
+    if ( $crit =~ /^\+/ ) { $offset += $warn; }
+
+    return $offset;
+    #return ( $crit * $Hour ) - ( $warn * $Hour );
+}
+
+#
+# Set our defaults
+#
+if ( not defined $opt_pattern ) { myexit 'DEPENDENT', "You must supply a pattern to search for"; }
+my $Pattern = $opt_pattern;
+
+# Reset options if given on the command line
+my $Warn = defined $opt_warn ? warn_offset( $opt_warn )        : warn_offset( $def_warn );
+my $Crit = defined $opt_crit ? crit_offset( $opt_crit, $Warn ) : crit_offset( $def_crit, $Warn );
+my $current_time = time;
+
+my %filehash = (   # Holds the latest file info
+    'NAME' => undef,
+    'TIME' => 0,
+    'SIZE' => 0,
+);
+
+my $checkstate  = q(OK);   # Set to the ECODE to return.
+my $checkresult = qq(All files matching $Pattern are OK);          # Verbose message to return
+my $checkdata   = undef;        # Nagios "Performance data"
+
+# Main()
+MAIN: {
+    foreach my $filename ( glob $Pattern ) {
+
+        next if not -f $filename;   # Only check files, not directories or symlinks.
+
+        my ( $filesize, $filetime ) = ( stat( $filename ) )[7,9];
+
+        # We're only interested in the latest file matching our pattern
+        next unless $filetime > $filehash{'TIME'};
+
+        $filehash{'NAME'} = $filename;
+        $filehash{'TIME'} = $filetime;
+        $filehash{'SIZE'} = $filesize;
+    }
+
+    if ( not defined $filehash{'NAME'} ) {
+        $checkstate  = 'UNKNOWN';
+        $checkresult = "There were no files matching $Pattern found";
+        last;
+    }
+
+    # At this point, our %filehash contains the most recent file matching the pattern.
+
+    $checkdata   = scalar localtime( $filehash{'TIME'} );
+
+    if ( $opt_verbose ) {
+        printf "Using the pattern %s ( Warning Offset = %s, Critical Offset = %s )\n", $Pattern, $Warn, $Crit;
+        if ( $opt_verbose > 1 ) {
+        printf "Current Time = %s\nFile Time    = %s\nDifference   = %s\n",
+            scalar localtime($current_time),
+            scalar localtime($filehash{'TIME'}),
+            $current_time - $filehash{'TIME'};
+        }
+        printf "Latest file found was %s (%s)\n", $filehash{'NAME'}, scalar localtime( $filehash{'TIME'} );
+    }
+
+    if ( ( $current_time - $filehash{'TIME'} ) > $Warn ) {
+        $checkstate  = 'WARNING';
+        $checkresult = "$Pattern has not been updated since " . scalar localtime( $filehash{'TIME'} );
+    }
+
+    if ( ( $current_time - $filehash{'TIME'} ) > $Crit ) { $checkstate  = 'CRITICAL'; }
+}
+
+#
+# Exit based on current state
+#
+myexit( $checkstate, $checkresult, $checkdata );
+
+#======= end script =======
+1;
