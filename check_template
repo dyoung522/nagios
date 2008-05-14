@@ -112,9 +112,9 @@ sub myexit($$$) {
 #
 # Set our defaults
 #
-my $checkstate  = q(UNKNOWN);
-my $checkresult = q();
-my $checkdata   = q();
+my $checkstate  = q(UNKNOWN);   # Set to the ECODE to return (OK, WARNING, or CRITICAL).
+my $checkresult = q();          # Verbose message to return
+my $checkdata   = q();          # Nagios "Performance data"
 
 # Main()
 MAIN: {
