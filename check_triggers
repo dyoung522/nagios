@@ -223,7 +223,6 @@ MAIN: {
     if ( $TimeSpecified ) {
         my $current_hour = ( localtime( $current_time ) )[2];
         my $current_day  = ( localtime( $current_time ) )[3];
-        my $file_hour    = ( localtime( $filehash{'TIME'} ) )[2];
         my $file_day     = ( localtime( $filehash{'TIME'} ) )[3];
 
         # has the file been updated today?
