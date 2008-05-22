@@ -229,13 +229,13 @@ MAIN: {
         if ( $current_day != $file_day ) {
 
             # Is it past the warning time?
-            if ( $current_hour > $Warn ) {
+            if ( $current_hour >= $Warn ) {
 
                 $checkstate  = 'WARNING';
                 $checkresult = "$Pattern has not been updated since " . scalar localtime( $filehash{'TIME'} );
 
                 # Ok, is it also past the critical time?
-                if ( $current_hour > $Crit ) { $checkstate = 'CRITICAL'; }
+                if ( $current_hour >= $Crit ) { $checkstate = 'CRITICAL'; }
             }
         }
 
