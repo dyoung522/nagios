@@ -26,7 +26,7 @@ use vars qw($opt_w $opt_c $opt_s $verbose);
 #
 ## Change These to suite your needs##
 $PROGNAME  = qq(check_sas);
-$CHECKNAME = qq($PROGNAME);  # In case this needs to be different
+$CHECKNAME = qq(SAS);  # In case this needs to be different
 $AUTHOR    = qq(Donovan C. Young);
 $VERSION   = "1.0"; # Program version
 
@@ -36,7 +36,6 @@ $TIMEOUT  = qq(15);
               'WARNING'   => 1,
               'CRITICAL'  => 2,
               'UNKNOWN'   => 3,
-              'DEPENDENT' => 4
             );
 
 #
@@ -47,7 +46,7 @@ Getopt::Long::Configure('bundling', 'no_ignore_case');
 GetOptions (
               "V|version"     => \&version,
               "h|help"        => \&help,
-              "v|verbose"     => \$verbose,
+              "v|verbose+"    => \$verbose,
               "w|warning=i"   => \$opt_w,
               "c|critical=i"  => \$opt_c,
            );
@@ -125,6 +124,7 @@ my %Months      = ( 'JAN' => 1,
                     'OCT' => 10,
                     'NOV' => 11,
                     'DEC' => 12 );
+my $SAS         = q(/opt/SAS/sas);
 my $checkstate  = q(UNKNOWN);   # Set to the ECODE to return (OK, WARNING, or CRITICAL).
 my $checkresult = q();          # Verbose message to return
 my $checkdata   = q();          # Nagios "Performance data"
@@ -133,9 +133,16 @@ my $days        = 60 * 60 * 24;
 
 # Main()
 MAIN: {
-    open SAS, "echo 'proc setinit; run;' | sas -nonews -stdio 2>&1 |" or myexit( 'CRITICAL', "Unable to run SAS" );
+    if ( not -x $SAS ) {
+        $checkstate = q(UNKNOWN);
+        $checkresult = "SAS does not appear to be installed on this server";
+        last;
+    }
+
+    open SAS, "echo 'proc setinit; run;' | $SAS -nonews -stdio 2>&1 |" or myexit( 'CRITICAL', "Unable to run SAS" );
     while ( <SAS> ) {
-        if ( /Expiration:\s+(\S*)\./ ) { $expiration = $1; last; }
+        if ( defined $verbose and $verbose >= 2 ) { print; }
+        if ( /^Expiration:\s+(\S*)\./ ) { $expiration = $1; }
     }
 
     if ( not defined $expiration ) {
@@ -144,7 +151,7 @@ MAIN: {
         last;
     }
 
-    my ( $day, $month, $year ) = /(\d+)(\w{3})(\d{4})/;
+    my ( $day, $month, $year ) = $expiration =~ /(\d+)(\w{3})(\d{4})/;
     $month = $Months{$month};
     my $date_expire = timelocal( 0, 0, 0, $day, $month - 1, $year - 1900 );
     my $date_today  = time;
