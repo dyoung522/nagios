@@ -123,14 +123,19 @@ if ( not defined $opt_w or not defined $opt_c ) {
 
 # Main()
 MAIN: {
-    my $checkcmd = q(/usr/local/bin/tapelist.pl);
-    if ( ! -x $checkcmd ) { myexit( 'DEPENDENT', "$checkcmd not found or is not executable", undef ); }
+    my $checkprog = q(/usr/local/bin/tapelist.pl);
+    if ( ! -x $checkprog ) { myexit( 'DEPENDENT', "$checkprog not found or is not executable", undef ); }
 
-    my $checkdata = qx(sudo $checkcmd --nagios) or
+    my $checkcmd = qq(sudo $checkprog --nagios);
+    if ( defined $verbose ) { print "Running $checkcmd\n"; }
+
+    my $checkdata = qx($checkcmd) or
         myexit( 'DEPENDENT', "Unable to run $checkcmd", undef );
 
     my ($tapes, $full, $active, $scratch ) = ( $checkdata =~ /tapes:(\d+); full:(\d+); active:(\d+); scratch:(\d+)/ ) or
         myexit( 'DEPENDENT', "$checkcmd did not return a valid result", "Return: $checkdata" );
+
+    if ( defined $verbose ) { print "Got \"$checkdata\"\n"; }
 
     if ( $scratch >  $opt_w ) { $checkstate = q(OK);       $checkresult = qq($scratch scratch tapes available); }
     if ( $scratch <= $opt_w ) { $checkstate = q(WARNING);  $checkresult = qq(Only $scratch scratch tapes available); }
