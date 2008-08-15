@@ -132,9 +132,9 @@ MAIN: {
     my ($tapes, $full, $active, $scratch ) = ( $checkdata =~ /tapes:(\d+); full:(\d+); active:(\d+); scratch:(\d+)/ ) or
         myexit( 'DEPENDENT', "$checkcmd did not return a valid result", "Return: $checkdata" );
 
-    if ( $scratch gt $opt_w ) { $checkstate = q(OK);       $checkresult = qq($scratch scratch tapes available); }
-    if ( $scratch le $opt_w ) { $checkstate = q(WARNING);  $checkresult = qq(Only $scratch scratch tapes available); }
-    if ( $scratch le $opt_c ) { $checkstate = q(CRITICAL); $checkresult = qq($opt_c or less scratch tapes available \($scratch\)); }
+    if ( $scratch >  $opt_w ) { $checkstate = q(OK);       $checkresult = qq($scratch scratch tapes available); }
+    if ( $scratch <= $opt_w ) { $checkstate = q(WARNING);  $checkresult = qq(Only $scratch scratch tapes available); }
+    if ( $scratch <= $opt_c ) { $checkstate = q(CRITICAL); $checkresult = qq($opt_c or less scratch tapes available \($scratch\)); }
 
     #
     # Exit based on current state
