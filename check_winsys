@@ -28,7 +28,7 @@ use vars qw($opt_t $opt_H $opt_p $verbose $opt_debug );
 $PROGNAME  = qq(check_winsys);
 $CHECKNAME = qq(WINSYS);  # In case this needs to be different
 $AUTHOR    = qq(Donovan C. Young);
-$VERSION   = "1.0"; # Program version
+$VERSION   = "1.1"; # Program version
 
 $TIMEOUT  = qq(15);
 %ECODES   = (
@@ -198,8 +198,9 @@ sub findhome {
 
         # If we get here, we must not be on the right page so send ESC
         # Need to send twice because the FlashConsole is stupid.
+        if ( $verbose >= 3 ) { print "Sending ESC...\n"; }
         $telnet->put('') or return undef;
-        $telnet->put('') or return undef;
+        sleep 2;    # Pause to make sure output is flushed
     }
 
     return 0;
