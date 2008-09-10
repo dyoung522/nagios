@@ -57,9 +57,6 @@ GetOptions (
 #
 # Global/Default Vars
 #
-my $checkstate  = q(OK);   # Set to the ECODE to return (OK, WARNING, or CRITICAL).
-my $checkresult = qq(All Drives on $opt_H:$opt_p report OK);          # Verbose message to return
-my $checkdata   = undef;        # Nagios "Performance data"
 my $Timeout     = 15;
 
 my $telnet = new Net::Telnet( Errmode => 'return',
@@ -70,6 +67,10 @@ my $telnet = new Net::Telnet( Errmode => 'return',
 if ( not defined $opt_H ) { die "Must include Host via (-H|--host)"; }
 if ( not defined $opt_p ) { die "Must include Port via (-p|--port)"; }
 if ( not defined $verbose ) { $verbose = 0; }
+
+my $checkstate  = q(OK);   # Set to the ECODE to return (OK, WARNING, or CRITICAL).
+my $checkresult = qq(All Drives on $opt_H:$opt_p report OK);          # Verbose message to return
+my $checkdata   = undef;        # Nagios "Performance data"
 
 #
 # Subroutines
