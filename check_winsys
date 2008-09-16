@@ -57,7 +57,8 @@ GetOptions (
 #
 # Global/Default Vars
 #
-my $Timeout     = 15;
+my $Timeout = defined $opt_t ? $opt_t : 90;
+if ( $verbose ) { print "Timeout set to $Timeout seconds\n"; }
 
 my $telnet = new Net::Telnet( Errmode => 'return',
                               Binmode => 1,
@@ -68,8 +69,10 @@ if ( not defined $opt_H ) { die "Must include Host via (-H|--host)"; }
 if ( not defined $opt_p ) { die "Must include Port via (-p|--port)"; }
 if ( not defined $verbose ) { $verbose = 0; }
 
-my $checkstate  = q(OK);   # Set to the ECODE to return (OK, WARNING, or CRITICAL).
-my $checkresult = qq(All Drives on $opt_H:$opt_p report OK);          # Verbose message to return
+$SIG{ALRM} = sub { die "timeout" };
+
+my $checkstate  = undef;
+my $checkresult = undef;
 my $checkdata   = undef;        # Nagios "Performance data"
 
 #
@@ -88,7 +91,7 @@ sub print_help {
    Intended as a command-line aid, not recommended for Nagios script usage.
 
 -t, --timeout
-   The amount of time to wait for a response from the host (default is $Timeout)
+   The amount of time (in seconds) to wait for a response from the host (default is $Timeout)
 
 -H, --host
    The Winchester SecureConsole IP or FQDN to check (required)
@@ -242,7 +245,7 @@ sub wsi_array_status {
             $idx = $chl . $id;
 
             if ( $maxidx == $idx ) {
-                return %array if $complete > 1;
+                return %array if $complete > 3;
                 $complete++;
             }
             if ( $maxidx < $idx ) { $maxidx = $idx; $complete = 0; }
@@ -271,11 +274,8 @@ sub wsi_array_status {
     return undef;
 }
 
-#
-# Set our defaults
-#
 # Main()
-MAIN: {
+eval {
     if ( defined $opt_debug ) { my $fh = $telnet->dump_log('debuglog'); }
 
     if ( $verbose ) { print "Opening connection to $opt_H:$opt_p\n"; }
@@ -285,10 +285,17 @@ MAIN: {
                  )
         or myexit( 'CRITICAL', "Unable to connect to $opt_H:$opt_p", $telnet->errmsg );
 
+    alarm($Timeout);
     my %Drives = wsi_array_status( $telnet )
         or myexit( 'CRITICAL', "Unable to obtain array status for $opt_H:$opt_p", $telnet->errmsg );
+    alarm(0);
+
+    my $total_drives = 0;
 
     for my $chl ( sort { $a <=> $b } keys %Drives ) {
+
+        $total_drives += scalar keys %{$Drives{$chl}};
+
         for my $id ( sort { $a <=> $b } keys %{$Drives{$chl}} ) {
             if ( $verbose >= 2 ) {
                 printf "%d %d %d %d %d %s %s %s\n",
@@ -316,11 +323,22 @@ MAIN: {
                 $checkdata   = "$chl $id $Drives{$chl}{$id}{LD} $Drives{$chl}{$id}{SPEED} $Drives{$chl}{$id}{SIZE} $Drives{$chl}{$id}{STATUS} $Drives{$chl}{$id}{VENDER} $Drives{$chl}{$id}{SERIAL}";
                 last;
             }
-
         }
     }
 
     $telnet->close();
+
+    if ( not defined $checkstate ) {
+        $checkstate  = q(OK);
+        $checkresult = qq(All $total_drives Drives on $opt_H:$opt_p report OK);
+    }
+};  # End eval
+
+if ( $@ ) {
+    if ( $@ =~ /timeout/ ) {
+        $checkstate  = q(UNKNOWN);
+        $checkresult = qq(Timeout occurred while checking $opt_H:$opt_p);
+    }
 }
 
 #
