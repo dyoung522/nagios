@@ -215,8 +215,8 @@ sub wsi_array_status {
     my $buffer   = ();
     my $line     = ();
     my %array    = ();
-    my $split    = '(\d\s+\d+\s+\d+\s+\d+MB\s+\d\s+[A-Z\-]+\s+[A-Z]+\s+[A-Z0-9]+)';
-    my $pattern  = '(\d)\s+(\d+)\s+(\d+)\s+(\d+)MB\s+(\d)\s+([A-Z\-]+)\s+([A-Z]+)\s+([A-Z0-9]+)';
+    my $split    = '(\d[\(\d\)]*\s+\d+\s+\d+\s+\d+MB\s+\w+\s+[A-Z\-]+\s+[A-Z]+\s+[A-Z0-9]+)';
+    my $pattern  = '(\d)[\(\d\)]*\s+(\d+)\s+(\d+)\s+(\d+)MB\s+(\w+)\s+([A-Z\-]+)\s+([A-Z]+)\s+([A-Z0-9]+)';
     my $first    = 1;
     my $complete = 0;
     my $idx      = 0;
@@ -298,7 +298,7 @@ eval {
 
         for my $id ( sort { $a <=> $b } keys %{$Drives{$chl}} ) {
             if ( $verbose >= 2 ) {
-                printf "%d %d %d %d %d %s %s %s\n",
+                printf "%d %d %s %d %d %s %s %s\n",
                     $chl, $id,
                     $Drives{$chl}{$id}{LD},
                     $Drives{$chl}{$id}{SPEED},
