@@ -130,7 +130,7 @@ if ( $release_date =~ m/expired/ ) { nagios_exit ( 'CRITICAL', "CASS Data has ex
 
 # Get the release number
 $release_number = readlink $check_directory;
-( $release_number ) = $release_number =~ m/mdata.(\d{6})/;
+( $release_number ) = $release_number =~ m/mdata.(.*)/ ? $1 : 'Unknown';
 
 # Convert current and release dates into epoch time
 $current_epoch = timelocal(localtime);
