@@ -235,6 +235,16 @@ sub wsi_array_status {
 
         if ( $verbose >= 4 ) { print "buffer = $buffer\n"; }
 
+        if ( $buffer =~ /BAD/ ) {
+            $array{0}{0}{SIZE}   = 0;
+            $array{0}{0}{SPEED}  = 0;
+            $array{0}{0}{LD}     = 0;
+            $array{0}{0}{STATUS} = 'BAD';
+            $array{0}{0}{VENDER} = 0;
+            $array{0}{0}{SERIAL} = 0;
+            return %array;
+        }
+
         for $line ( $buffer =~ m/$split/gc ) {
 
             if ( $verbose >= 3 ) { print "line = $line\n"; }
@@ -242,7 +252,8 @@ sub wsi_array_status {
             next unless my ( $chl, $id, $size, $speed, $ld, $status, $vender, $serial ) =
                 ( $line =~ m/$pattern/og );
 
-            $idx = $chl . $id;
+            #$idx = $chl . $id;
+            $idx = $id;
 
             if ( $maxidx == $idx ) {
                 return %array if $complete > 3;
