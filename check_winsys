@@ -19,7 +19,7 @@ use Net::Telnet;
 
 use strict;
 use vars qw($PROGNAME $CHECKNAME $AUTHOR $TIMEOUT %ECODES $VERSION);
-use vars qw($opt_t $opt_H $opt_p $verbose $opt_debug );
+use vars qw($opt_t $opt_H $opt_p $opt_d $verbose $opt_debug );
 
 #
 # common variables
@@ -51,6 +51,7 @@ GetOptions (
               "t|timeout=i"   => \$opt_t,
               "H|host=s"      => \$opt_H,
               "p|port=i"      => \$opt_p,
+              "d|drives=i"    => \$opt_d,
               "debug"         => \$opt_debug,
            );
 
@@ -99,6 +100,9 @@ sub print_help {
 -p, --port
    The Port to connect to on the above Host (required)
 
+-d, --drives
+   The number of physical drives in the array, this will enable an additional check
+   to be sure we were able to 'see' all the drives in the array.
 ";
 }
 
@@ -342,6 +346,13 @@ eval {
     if ( not defined $checkstate ) {
         $checkstate  = q(OK);
         $checkresult = qq(All $total_drives Drives on $opt_H:$opt_p report OK);
+    }
+
+    if ( defined $opt_d and $opt_d > 0 ) {
+        if ( $total_drives != $opt_d ) {
+            $checkstate  = q(CRITICAL);
+            $checkresult = qq(Drive mismatch on $opt_H:$opt_p! We were told there are $opt_d, but we found $total_drives);
+        }
     }
 };  # End eval
 
