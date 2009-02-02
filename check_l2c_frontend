@@ -146,7 +146,7 @@ my $TEST_XML = <<EOX;
 <l2crequest xmlns="http://www.l2cinc.com/L2CQS/1.0">
     <type>request</type>
     <purpose>test</purpose>
-    <customerId>600103</customerId>
+    <customerId>600099</customerId>
     <txRefId>0011070085208263</txRefId>
     <query xmlns="">
         <firstName>Owen</firstName>
