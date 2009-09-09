@@ -111,14 +111,15 @@ BEGIN {
 
     sub set_state {
         my ( $state, $message, $perfdata ) = @_;
-        if ( not defined $state ) { return; }
+        if ( not defined $state ) { return undef; }
         if ( not defined $CurrentState ) { $CurrentState = 'OK'; }
 
         if ( $ECODES{$state} > $ECODES{$CurrentState} ) { $CurrentState = $state; }
 
         if ( defined $message ) { push @CurrentStatus, $message; }
-
         if ( defined $perfdata ) { $CurrentPerfdata = $perfdata; }
+
+        return $state;
     }
 
     sub set_status { if ( @_ ) { push @CurrentStatus, $_; } }
@@ -199,10 +200,13 @@ sub get_status($) {
 }
 
 # Checks the status against the given parameters
-#  statusresult is the result to check against
-#  $normal is the string for a good result
-#  @warning is an array containing any strings for warning results
-#  otherwise we return critical.
+#  $message is arbitrary text to display as part of the status message.
+#  $statusresult is the result to check against
+#  $normalresult is the string for a good result
+#  @warningresult is an array containing any strings for warning results
+#
+#  We return CRITICAL unless we match against $normalresult or @warningresult.
+#
 sub check_status {
     my ( $message, $statusresult, $normalresult, @warningresult ) = @_;
     my $checkstatus = q(OK);
@@ -217,12 +221,11 @@ sub check_status {
             }
         }
     }
-    if ( defined $message ) {
-        set_state( $checkstatus, "$message is $statusresult" );
-        print_state( $message, $statusresult, $checkstatus );
-    } else { set_state( $checkstatus ); }
+    if ( not defined $message ) { return set_state( $checkstatus ); }
 
-    return $checkstatus;
+    print_state( $message, $statusresult, $checkstatus );
+
+    return set_state( $checkstatus, "$message is $statusresult" );
 }
 
 #
