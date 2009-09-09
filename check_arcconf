@@ -1,0 +1,274 @@
+#!/usr/bin/perl -w
+
+#
+# Author: 
+#
+#  Donovan C. Young
+#
+# Description:
+# -----------
+#
+#  Uses /usr/StorMan/arcconf to check the status of the Adaptec storage arrays
+#
+# Implementation Notes:
+# ---------------------
+#
+#  arcconf can only be run by root so we are running it via sudo.
+#
+#  This requires the following line be added to /etc/sudoers:
+#
+#  nagios  ALL = (root) NOPASSWD: /usr/StorMan/arcconf
+#
+########################################################################
+
+require 5.004;
+
+use POSIX;
+
+use strict;
+use vars qw($PROGNAME $CHECKNAME $AUTHOR $TIMEOUT %ECODES $VERSION);
+use vars qw($opt_w $opt_c $opt_s $verbose);
+
+#
+# common variables
+#
+## Change These to suite your needs##
+$PROGNAME  = q(check_arcconf);
+$CHECKNAME = q(ARCCONF);
+$AUTHOR    = q(Donovan C. Young);
+$VERSION   = "1.0";
+
+$TIMEOUT  = q(15);
+%ECODES   = (
+              'OK'        => 0,
+              'WARNING'   => 1,
+              'CRITICAL'  => 2,
+              'UNKNOWN'   => 3,
+              'DEPENDENT' => 4
+            );
+
+#
+# Process Options
+#
+use Getopt::Long;
+Getopt::Long::Configure('bundling', 'no_ignore_case');
+GetOptions (
+              "V|version"     => \&version,
+              "h|help"        => \&help,
+              "v|verbose"     => \$verbose,
+              "w|warning=i"   => \$opt_w,
+              "c|critical=i"  => \$opt_c,
+           );
+
+#
+# Subroutines
+#
+sub print_usage {
+    print "Usage: $PROGNAME [-vh] [-w warn] [-c crit]\n";
+}
+
+sub print_help {
+    print "\nWritten by $AUTHOR\n\nPerl plugin for Nagios\n\n";
+    print_usage();
+    print "
+-v, --verbose
+   Return additional information. 
+   Intended as a command-line aid, not recommended for Nagios script usage.
+
+-w, --warning=INTEGER
+   Level at which we should issue a warning.  If omitted, no warning is generated. 
+
+-c, --critical=INTEGER
+   Level at which we should issue a critical alert.  A critical is also generated
+   if we cannot obtain output from arcconf.
+
+";
+}
+
+sub revision {
+    my $commandName = $PROGNAME;
+    my $pluginRevision = $VERSION;
+    print "$commandName $pluginRevision\n";
+    print " The nagios plugins come with ABSOLUTELY NO WARRANTY. You may redistribute\n";
+    print " copies of the plugins under the terms of the GNU General Public License.\n";
+    print " For more information about these matters, see the file named COPYING.\n";
+}
+
+sub version {
+    revision();
+    exit $ECODES{'OK'};
+}
+
+sub help {
+    print_help();
+    exit $ECODES{'OK'};
+}
+
+# These routine manipulate the highest current alert status
+# while keeping an array of all status messages.
+BEGIN {
+    my ( $CurrentState, @CurrentStatus, $CurrentPerfdata ) = undef;
+
+    sub set_state {
+        my ( $state, $message, $perfdata ) = @_;
+        if ( not defined $state ) { return; }
+        if ( not defined $CurrentState ) { $CurrentState = 'OK'; }
+
+        if ( $ECODES{$state} > $ECODES{$CurrentState} ) { $CurrentState = $state; }
+
+        if ( defined $message ) { push @CurrentStatus, $message; }
+
+        if ( defined $perfdata ) { $CurrentPerfdata = $perfdata; }
+    }
+
+    sub set_status { if ( @_ ) { push @CurrentStatus, $_; } }
+    sub set_perfdata { if ( @_ ) { $CurrentPerfdata = @_; } }
+    sub print_state { if ( defined $verbose ) { printf "%-30s : %-10s [%s]\n", @_; } }
+
+    sub get_state {
+        if ( defined $verbose ) {
+            print "Status of checks is $CurrentState.  Any detailed messages follow.\n";
+            foreach my $status ( @CurrentStatus ) { print "$status\n"; }
+            print "\n";
+        }
+    }
+
+    sub nagios_exit {
+        if ( @_ ) { set_state( @_ ); }
+
+        if ( not defined $CurrentState ) { $CurrentState = 'UNKNOWN'; }
+
+        printf "%s %s", $CHECKNAME, $CurrentState;
+        if ( @CurrentStatus           ) { print " - " . join q(; ), @CurrentStatus; }
+        if ( defined $CurrentPerfdata ) { print "|$CurrentPerfdata"; }
+        print "\n";
+
+        exit $ECODES{$CurrentState};
+    }
+}
+
+sub get_controllers($) {
+    my ( $command ) = @_;
+    my $controllers = undef;
+
+    open CMD, "sudo $command GETVERSION |" or die "Unable to run $command:  $!\n";
+    while( <CMD> ) {
+        next unless /Controllers found:\s*(\d+)/;
+        $controllers = $1;
+        if ( defined $verbose ) { print "Found $controllers Controller(s)\n"; }
+    }
+    close CMD;
+
+    return $controllers;
+}
+
+sub get_status($) {
+    my ( $command ) = @_;
+    my @status = ();
+    my $controllers = get_controllers($command) or nagios_exit( 'UNKNOWN', 'No Controllers Found' );
+
+    for ( my $controller = 1 ; $controller <= $controllers ; $controller++ ) {
+        open CMD, "sudo $command GETCONFIG $controller AL |" or die "Unable to run $command:  $!\n";
+        while( <CMD> ) {
+            # Controller Status
+            if ( /Controller Status\s*:\s*(.*)$/ )                  { $status[$controller]{'status'}     = $1; }
+            # Controller Temp
+            if ( /Temperature\s*:\s*(\d+) C\/ \d+ F \((.*)\)$/ )    { $status[$controller]{'temp'}       = $1;
+                                                                      $status[$controller]{'tempstatus'} = $2; }
+
+            # Count of defunct drives
+            if ( /Defunct disk drive count\s*:\s*(\d+)$/ )          { $status[$controller]{'defunct'}    = $1; }
+
+            # logical drive status
+            if ( /Logical devices\/Failed\/Degraded\s*:\s*(\d+)\/(\d+)\/(\d+)$/ ) {
+                                                                      $status[$controller]{'devices'}    = $1;
+                                                                      $status[$controller]{'failed'}     = $2;
+                                                                      $status[$controller]{'degraded'}   = $3;
+            }
+
+            # Battery Status
+            if ( /Status\s*:\s*(.*)$/ )                             { $status[$controller]{'battery'}{'status'}   = $1; }
+            if ( /Over temperature\s*:\s*(.*)$/ )                   { $status[$controller]{'battery'}{'overtemp'} = $1; }
+            if ( /Capacity remaining\s*:\s*(.*)$/ )                 { $status[$controller]{'battery'}{'capacity'} = $1; }
+            if ( /Time remaining \(at current draw\)\s*:\s*(.*)$/ ) { $status[$controller]{'battery'}{'time'}     = $1; }
+       }
+       close CMD;
+    }
+
+    return @status;
+}
+
+# Checks the status against the given parameters
+#  statusresult is the result to check against
+#  $normal is the string for a good result
+#  @warning is an array containing any strings for warning results
+#  otherwise we return critical.
+sub check_status {
+    my ( $message, $statusresult, $normalresult, @warningresult ) = @_;
+    my $checkstatus = q(OK);
+
+    if ( not defined $statusresult ) { return q(UNKNOWN); }
+
+    if ( not $statusresult =~ /$normalresult/i ) {
+        $checkstatus = q(CRITICAL);
+        if ( @warningresult ) {
+            for my $result ( @warningresult ) {
+                if ( $statusresult =~ /$result/i ) { $checkstatus = q(WARNING); }
+            }
+        }
+    }
+    if ( defined $message ) {
+        set_state( $checkstatus, "$message is $statusresult" );
+        print_state( $message, $statusresult, $checkstatus );
+    } else { set_state( $checkstatus ); }
+
+    return $checkstatus;
+}
+
+#
+# Set our defaults
+#
+my $checkstatus = q(OK);
+my $checkresult = q();
+my $checkcommand = q(/usr/StorMan/arcconf);
+if ( not -e $checkcommand ) { nagios_exit( 'DEPENDENT', "$checkcommand is not installed on this host" ); }
+
+# Main()
+MAIN: {
+    my @status = get_status($checkcommand) or nagios_exit( 'CRITICAL', 'Unable to retrieve Adaptec Array status' );
+
+    for ( my $controller = 1 ; $controller <= $#status ; $controller++ ) {
+
+        # Check overall status, should be 'Optimal'
+        $checkstatus = check_status( "C$controller Status", $status[$controller]{'status'}, q(optimal) );
+
+        # Check controller temp
+        $checkstatus = check_status( "C$controller Temp", $status[$controller]{'tempstatus'}, q(normal) );
+
+        # Check drives status
+        $checkstatus = check_status( "C$controller Dead Drives", $status[$controller]{'defunct'}, 0 );
+        $checkstatus = check_status( "C$controller Failed Drives", $status[$controller]{'failed'}, 0 );
+        $checkstatus = check_status( "C$controller Degraded Drives", $status[$controller]{'degrade'}, 0, "[1-9]" );
+
+        # Check battery status, should be 'Optimal'
+        $checkstatus = check_status( "C$controller Battery", $status[$controller]{'battery'}{'status'}, q(optimal), [ 'not present', 'recharg' ] );
+        $checkstatus = check_status( "C$controller Battery Temp", $status[$controller]{'battery'}{'overtemp'}, q(no) );
+        $checkstatus = check_status( "C$controller Capacity", $status[$controller]{'battery'}{'capacity'}, "^(9?|100)", [ "^8?" ] );
+
+        # Print a blank line between controllers
+        if ( defined $verbose ) { print "\n"; }
+    }
+}
+
+#
+# Remove UcliEvt.log created by arcconf
+#
+if ( -e "UcliEvt.log" ) { unlink "UcliEvt.log"; }
+
+#
+# Exit based on current state
+#
+nagios_exit;
+
+#======= end script =======
+1;
